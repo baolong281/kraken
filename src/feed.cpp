@@ -36,8 +36,11 @@ struct SubscribeMessage {
 Feed::Feed(const FeedConfig &cfg)
     : socket_(), worker_(), running_(false), config(cfg) {};
 
-void Feed::start() {
+void Feed::start(FeedCallback cb) {
   try {
+
+    callback_ = cb;
+
     Poco::Net::initializeSSL();
     certHandler_ = new Poco::Net::AcceptCertificateHandler(false);
 
@@ -86,7 +89,7 @@ void Feed::run() {
     int flags;
     while (running_) {
       int n = socket_->receiveFrame(buffer, sizeof(buffer), flags);
-      Logger::instance().info(std::string(buffer, n));
+      callback_(buffer, static_cast<size_t>(n));
     }
   } catch (const std::exception &e) {
     // Log error or notify callback

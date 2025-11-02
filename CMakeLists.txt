@@ -12,6 +12,7 @@ find_path(POCO_INCLUDE_DIR
   HINTS /usr/local/include /usr/include
 )
 
+find_package(Boost REQUIRED)
 find_library(POCO_FOUNDATION_LIBRARY
   NAMES PocoFoundation
   HINTS /usr/local/lib /usr/lib
@@ -46,6 +47,7 @@ target_include_directories(app
     PRIVATE
         ${POCO_INCLUDE_DIR}
         ${OPENSSL_INCLUDE_DIR}
+        ${Boost_INCLUDE_DIRS}
         include       
 )
 
