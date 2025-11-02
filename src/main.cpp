@@ -63,7 +63,5 @@ int main() {
         std::cerr << "Feed thread exception: " << e.what() << "\n";
     }
 
-    std::cout << "enede" << std::endl;
-
     return 0;
 }
