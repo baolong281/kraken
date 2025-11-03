@@ -13,6 +13,62 @@
 #include <Poco/SharedPtr.h>
 #include <glaze/glaze.hpp>
 
+std::string getResponseType(const char *buffer, size_t n) {
+
+  std::string response_type = "";
+
+  try {
+    KrakenMessage msg;
+    std::string json_str(buffer, n);
+    auto err = glz::read_json(msg, json_str);
+    response_type = msg.type;
+  } catch (const std::exception &e) {
+    // handle parsing errors
+    Logger::instance().error("Failed to parse Kraken Level3 JSON: {}");
+  }
+
+  return response_type;
+}
+
+inline std::vector<KrakenOrder> parseKrakenLevel3Buffer(const char *buffer,
+                                                        size_t n) {
+  std::vector<KrakenOrder> orders;
+
+  try {
+    KrakenMessage msg;
+    std::string json_str(buffer, n);
+    auto err = glz::read_json(msg, json_str);
+
+    for (const auto &update : msg.data) {
+      auto convert = [&](const OrderEvent &event, OrderSide side) {
+        KrakenOrder o;
+        o.id_ = event.order_id;
+        o.side_ = side;
+        if (event.event == "add")
+          o.type_ = OrderType::add;
+        else if (event.event == "delete")
+          o.type_ = OrderType::remove;
+        else
+          o.type_ = OrderType::update;
+        o.price_ = event.limit_price;
+        o.qty_ = event.order_qty;
+        return o;
+      };
+
+      for (const auto &ev : update.bids)
+        orders.push_back(convert(ev, OrderSide::bid));
+      for (const auto &ev : update.asks)
+        orders.push_back(convert(ev, OrderSide::ask));
+    }
+
+  } catch (const std::exception &e) {
+    // handle parsing errors
+    Logger::instance().error("Failed to parse Kraken Level3 JSON: {}");
+  }
+
+  return orders;
+}
+
 struct SubscribeParams {
   std::string channel{"level3"};
   std::vector<std::string> symbol{"BTC/USD"};
@@ -33,13 +89,11 @@ struct SubscribeMessage {
   }
 };
 
-Feed::Feed(const FeedConfig &cfg)
-    : socket_(), worker_(), running_(false), config(cfg) {};
-
-void Feed::start(FeedCallback cb) {
+void Feed::start(FeedCallback feed_cb, SnapshotCallback snapshot_cb) {
   try {
 
-    callback_ = cb;
+    callback_ = feed_cb;
+    snapshot_callback_ = snapshot_cb;
 
     Poco::Net::initializeSSL();
     certHandler_ = new Poco::Net::AcceptCertificateHandler(false);
@@ -58,7 +112,8 @@ void Feed::start(FeedCallback cb) {
 
     socket_ =
         std::make_unique<Poco::Net::WebSocket>(*session_, request, response);
-    Logger::instance().info("Connection sucessfull: " + response.getStatus());
+    auto placeholder = "Connection sucessfull: ";
+    Logger::instance().info(placeholder + response.getStatus());
 
     SubscribeMessage subMessage{};
     subMessage.params.token = config.token;
@@ -68,13 +123,38 @@ void Feed::start(FeedCallback cb) {
                        Poco::Net::WebSocket::FRAME_TEXT);
     Logger::instance().info("Sending subscribe request: " + msg);
 
-    char buffer[1024];
+    // getting intial snapshot message
+    // we may get other updates first which we put into a backlog to apply after
+    // TODO: apply this backlog
+    char buffer[8192];
     int flags;
-    int n = socket_->receiveFrame(buffer, sizeof(buffer), flags);
-    Logger::instance().info("Successfully subscribed to feed!" +
-                            std::string(buffer, n));
 
+    bool snapshot_recieved = false;
+    int n;
+
+    std::vector<KrakenOrder> order_backlog;
+
+    while (!snapshot_recieved) {
+      n = socket_->receiveFrame(buffer, sizeof(buffer), flags);
+      auto response_type = getResponseType(buffer, n);
+
+      if (response_type == "snapshot") {
+        snapshot_recieved = true;
+      } else if (response_type == "update") {
+        auto orders = parseKrakenLevel3Buffer(buffer, n);
+        order_backlog.insert(order_backlog.end(), orders.begin(), orders.end());
+      }
+    }
+
+    for (auto &o : order_backlog) {
+      std::cout << o.toString() << std::endl;
+    }
+
+    auto orders = parseKrakenLevel3Buffer(buffer, n);
+    snapshot_callback_(orders);
     running_.store(true, std::memory_order_release);
+
+    // start network thread
     worker_ = std::thread(&Feed::run, this);
   } catch (const std::exception &e) {
     running_.store(false, std::memory_order_release);
@@ -82,6 +162,7 @@ void Feed::start(FeedCallback cb) {
   }
 }
 
+// the network thread will read off the wire and parse json messages into orders
 void Feed::run() {
   Logger::instance().info("Listening to feed in background...");
   try {
@@ -89,10 +170,14 @@ void Feed::run() {
     int flags;
     while (running_) {
       int n = socket_->receiveFrame(buffer, sizeof(buffer), flags);
-      callback_(buffer, static_cast<size_t>(n));
+
+      auto orders = parseKrakenLevel3Buffer(buffer, n);
+      for (auto &o : orders) {
+
+        callback_(o);
+      }
     }
   } catch (const std::exception &e) {
-    // Log error or notify callback
     std::cerr << "Feed thread exception: " << e.what() << "\n";
   } catch (...) {
     std::cerr << "Feed thread unknown exception\n";

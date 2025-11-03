@@ -1,6 +1,7 @@
 #include "consumer.h"
 #include "feed.h"
 #include "logger.h"
+#include "order_book.h"
 #include <Poco/Exception.h>
 #include <array>
 #include <boost/lockfree/spsc_queue.hpp>
@@ -30,12 +31,15 @@ std::string exec(const std::string &cmd) {
 
 std::string getToken() {
   try {
+    Logger::instance().info("Retrieving token for data feed");
 
     std::string token = exec("python3 get_kraken_token.py");
 
     if (!token.empty() && token.back() == '\n') {
       token.pop_back();
     }
+
+    Logger::instance().info("Token for data feed retrieved.");
 
     return token;
   } catch (const std::exception &e) {
@@ -53,16 +57,40 @@ int main() {
     config.port = 443;
     config.token = getToken();
 
-    Consumer<std::string> consumer{1024};
+    OrderBook book{"BTC/USD"};
+
+    Consumer<KrakenOrder> consumer{
+        1024, [&book](KrakenOrder order) {
+          std::cout << order.toString() << std::endl;
+          if (order.type_ == OrderType::add) {
+            book.add(order);
+          } else {
+            book.modify(order, order.type_ == OrderType::remove ? true : false);
+          }
+        }};
+
+    FeedCallback feedCb = [&consumer](const KrakenOrder &order) {
+      consumer.eat(order);
+    };
+
+    SnapshotCallback snapshotCb =
+        [&book](const std::vector<KrakenOrder> &initialOrders) {
+          Logger::instance().info("Updating initial book state with orders: ");
+          for (auto &o : initialOrders) {
+            Logger::instance().info(o.toString());
+            book.add(o);
+          }
+          Logger::instance().info("Book initial snapshot constructed.");
+          book.printBook();
+        };
 
     Feed dataFeed{config};
-    dataFeed.start([&consumer](char *buf, size_t n) {
-      consumer.eat(std::string(buf, n));
-    });
+    dataFeed.start(feedCb, snapshotCb);
 
     std::string s;
     while (true) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      book.printBook();
     }
 
   } catch (Poco::Exception &exc) {

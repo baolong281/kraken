@@ -41,6 +41,7 @@ find_library(OPENSSL_SSL_LIBRARY ssl HINTS ${OPENSSL_LIB_DIR})
 add_executable(app
   src/main.cpp
   src/feed.cpp
+  src/order_book.cpp
 )
 
 target_include_directories(app
