@@ -2,6 +2,7 @@
 #include "feed.h"
 #include <algorithm>
 #include <fmt/core.h>
+#include <glaze/glaze.hpp>
 #include <memory>
 
 void OrderBook::add(const KrakenOrder &order) {
@@ -19,6 +20,43 @@ void OrderBook::modify(const KrakenOrder &order, bool remove) {
   } else {
     std::cerr << "Book not found: " << order.symbol_ << "\n";
   }
+}
+
+struct BookStruct {
+  std::string symbol{};
+  std::vector<Level> bid{};
+  std::vector<Level> asks{};
+};
+
+struct OrderBookStruct {
+  std::vector<BookStruct> books{};
+};
+
+std::string OrderBook::serialize() const {
+  OrderBookStruct ob;
+
+  for (auto &[symbol, book] : books_) {
+    BookStruct bs{};
+    bs.symbol = symbol;
+
+    std::vector<Level> bid{};
+
+    for (auto &lvl : book->getBids()) {
+      bid.push_back(*lvl);
+    }
+
+    std::vector<Level> ask{};
+    for (auto &lvl : book->getAsks()) {
+      ask.push_back(*lvl);
+    }
+
+    bs.bid = bid;
+    bs.asks = ask;
+
+    ob.books.push_back(bs);
+  }
+
+  return glz::write_json(ob).value_or("error");
 }
 
 void Book::add(const KrakenOrder &order) {
@@ -57,7 +95,8 @@ void Book::modify(const KrakenOrder &order, bool remove) {
     if (remove)
       orders_.erase(order.id_);
 
-    if (level.qty_ <= 0) {
+    constexpr double EPSILON = 1e-9;
+    if (level.qty_ <= EPSILON) {
       LevelVec &levels = (order.side_ == OrderSide::bid) ? bids_ : asks_;
 
       // find the matching level pointer

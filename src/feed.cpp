@@ -117,6 +117,8 @@ void Feed::start(FeedCallback feed_cb, SnapshotCallback snapshot_cb) {
     while (snapshots_remaining > 0) {
       n = socket_->receiveFrame(buffer, sizeof(buffer), flags);
 
+      Logger::instance().info("Received: " + std::string(buffer, n));
+
       auto response_type = getResponseType(buffer, n);
 
       if (response_type == "snapshot") {

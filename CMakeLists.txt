@@ -12,6 +12,11 @@ find_path(POCO_INCLUDE_DIR
   HINTS /usr/local/include /usr/include
 )
 
+find_path(HTTPLIB_INCLUDE_DIR
+  NAMES httplib.h
+  HINTS /opt/homebrew/Cellar/cpp-httplib/0.26.0/
+)
+
 find_package(Boost REQUIRED)
 find_library(POCO_FOUNDATION_LIBRARY
   NAMES PocoFoundation
@@ -29,6 +34,7 @@ FetchContent_MakeAvailable(glaze)
 
 find_library(POCO_NET_LIBRARY       PocoNet       HINTS /usr/local/lib /usr/lib)
 find_library(POCO_NETSSL_LIBRARY    PocoNetSSL    HINTS /usr/local/lib /usr/lib)
+
 
 set(OPENSSL_ROOT_DIR /opt/homebrew/Cellar/openssl@3/3.5.2)
 set(OPENSSL_INCLUDE_DIR ${OPENSSL_ROOT_DIR}/include)
@@ -50,6 +56,7 @@ target_include_directories(app
         ${OPENSSL_INCLUDE_DIR}
         ${Boost_INCLUDE_DIRS}
         include       
+        ${HTTPLIB_INCLUDE_DIR}
 )
 
 target_link_libraries(app PRIVATE

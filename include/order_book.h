@@ -76,6 +76,8 @@ public:
     }
   }
 
+  std::string serialize() const;
+
 private:
   std::unordered_map<std::string, BookPtr> books_;
 };

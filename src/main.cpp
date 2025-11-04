@@ -1,10 +1,12 @@
 #include "consumer.h"
 #include "feed.h"
+#include "httplib.h"
 #include "logger.h"
 #include "order_book.h"
 #include <Poco/Exception.h>
 #include <array>
 #include <boost/lockfree/spsc_queue.hpp>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -93,9 +95,21 @@ int main() {
 
     book.printBooks();
 
-    while (true) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    }
+    // HTTP
+    httplib::Server svr;
+
+    svr.Get(
+        "/book", [&book](const httplib::Request &req, httplib::Response &res) {
+          res.set_header("Access-Control-Allow-Origin", "*");
+          res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+          res.set_header("Access-Control-Allow-Headers", "Content-Type");
+          res.set_content(book.serialize(), "text/plain");
+        });
+
+    svr.listen("0.0.0.0", 4000);
+
+    while (true)
+      std::this_thread::sleep_for(std::chrono::seconds(60));
 
   } catch (Poco::Exception &exc) {
     std::cerr << "WebSocket error: " << exc.what() << std::endl;
