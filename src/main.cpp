@@ -11,6 +11,12 @@
 #include <stdexcept>
 #include <string>
 
+std::string fmt_double(double val, int precision = 2) {
+  std::ostringstream ss;
+  ss << std::fixed << std::setprecision(precision) << val;
+  return ss.str();
+}
+
 // Execute command and capture output
 std::string exec(const std::string &cmd) {
   std::array<char, 128> buffer;
@@ -51,17 +57,17 @@ std::string getToken() {
 int main() {
   try {
 
-    FeedConfig config{};
-    config.host = "ws-auth.kraken.com";
-    config.path = "/v2";
-    config.port = 443;
-    config.token = getToken();
+    std::string token = getToken();
 
-    OrderBook book{"BTC/USD"};
+    SubscribeParams params{
+        "level3", {"BTC/USD", "ETH/USD", "XRP/USD"}, true, token};
+
+    FeedConfig config{"ws-auth.kraken.com", "/v2", 443, params};
+
+    OrderBook book{};
 
     Consumer<KrakenOrder> consumer{
         1024, [&book](KrakenOrder order) {
-          std::cout << order.toString() << std::endl;
           if (order.type_ == OrderType::add) {
             book.add(order);
           } else {
@@ -77,20 +83,18 @@ int main() {
         [&book](const std::vector<KrakenOrder> &initialOrders) {
           Logger::instance().info("Updating initial book state with orders: ");
           for (auto &o : initialOrders) {
-            Logger::instance().info(o.toString());
             book.add(o);
           }
           Logger::instance().info("Book initial snapshot constructed.");
-          book.printBook();
         };
 
     Feed dataFeed{config};
     dataFeed.start(feedCb, snapshotCb);
 
-    std::string s;
+    book.printBooks();
+
     while (true) {
       std::this_thread::sleep_for(std::chrono::milliseconds(500));
-      book.printBook();
     }
 
   } catch (Poco::Exception &exc) {

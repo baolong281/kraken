@@ -52,6 +52,7 @@ inline std::vector<KrakenOrder> parseKrakenLevel3Buffer(const char *buffer,
           o.type_ = OrderType::update;
         o.price_ = event.limit_price;
         o.qty_ = event.order_qty;
+        o.symbol_ = update.symbol;
         return o;
       };
 
@@ -68,26 +69,6 @@ inline std::vector<KrakenOrder> parseKrakenLevel3Buffer(const char *buffer,
 
   return orders;
 }
-
-struct SubscribeParams {
-  std::string channel{"level3"};
-  std::vector<std::string> symbol{"BTC/USD"};
-  bool snapshot{true};
-  std::string token; // to be filled dynamically
-
-  template <typename T> static auto reflect(T &self) {
-    return std::tie(self.channel, self.symbol, self.snapshot, self.token);
-  }
-};
-
-struct SubscribeMessage {
-  std::string method{"subscribe"};
-  SubscribeParams params;
-
-  template <typename T> static auto reflect(T &self) {
-    return std::tie(self.method, self.params);
-  }
-};
 
 void Feed::start(FeedCallback feed_cb, SnapshotCallback snapshot_cb) {
   try {
@@ -115,9 +96,8 @@ void Feed::start(FeedCallback feed_cb, SnapshotCallback snapshot_cb) {
     auto placeholder = "Connection sucessfull: ";
     Logger::instance().info(placeholder + response.getStatus());
 
-    SubscribeMessage subMessage{};
-    subMessage.params.token = config.token;
-    std::string msg = glz::write_json(subMessage).value_or("error");
+    SubscribeMessage msg_s{"subscribe", config.params};
+    std::string msg = glz::write_json(msg_s).value_or("error");
 
     socket_->sendFrame(msg.data(), msg.size(),
                        Poco::Net::WebSocket::FRAME_TEXT);
@@ -126,32 +106,36 @@ void Feed::start(FeedCallback feed_cb, SnapshotCallback snapshot_cb) {
     // getting intial snapshot message
     // we may get other updates first which we put into a backlog to apply after
     // TODO: apply this backlog
-    char buffer[8192];
+    char buffer[16384];
     int flags;
 
-    bool snapshot_recieved = false;
+    int snapshots_remaining = config.params.symbol.size();
     int n;
 
     std::vector<KrakenOrder> order_backlog;
 
-    while (!snapshot_recieved) {
+    while (snapshots_remaining > 0) {
       n = socket_->receiveFrame(buffer, sizeof(buffer), flags);
+
       auto response_type = getResponseType(buffer, n);
 
       if (response_type == "snapshot") {
-        snapshot_recieved = true;
+        auto orders = parseKrakenLevel3Buffer(buffer, n);
+        snapshot_callback_(orders);
+        snapshots_remaining--;
       } else if (response_type == "update") {
         auto orders = parseKrakenLevel3Buffer(buffer, n);
         order_backlog.insert(order_backlog.end(), orders.begin(), orders.end());
       }
     }
 
-    for (auto &o : order_backlog) {
-      std::cout << o.toString() << std::endl;
-    }
+    Logger::instance().info("Processing backlog...");
+    Logger::instance().info("Backlog size: " +
+                            std::to_string(order_backlog.size()));
 
-    auto orders = parseKrakenLevel3Buffer(buffer, n);
-    snapshot_callback_(orders);
+    for (auto &o : order_backlog)
+      callback_(o);
+
     running_.store(true, std::memory_order_release);
 
     // start network thread

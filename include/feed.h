@@ -19,6 +19,7 @@ struct KrakenOrder {
   OrderType type_;
   Price price_;
   Quantity qty_;
+  std::string symbol_;
 
   std::string toString() const {
     std::ostringstream oss;
@@ -40,7 +41,8 @@ struct KrakenOrder {
 
     // Format the output
     oss << "OrderID: " << id_ << ", Side: " << sideStr << ", Type: " << typeStr
-        << ", Price: " << price_ << ", Qty: " << qty_;
+        << ", Price: " << price_ << ", Qty: " << qty_ << ", Symbol: " << symbol_
+        << "\n";
 
     return oss.str();
   }
@@ -68,11 +70,23 @@ struct KrakenMessage {
   std::vector<Level3Update> data;
 };
 
+struct SubscribeParams {
+  std::string channel{"level3"};
+  std::vector<std::string> symbol{"BTC/USD"};
+  bool snapshot{true};
+  std::string token{};
+};
+
 struct FeedConfig {
-  std::string host;
-  std::string path;
-  std::string token;
-  int port;
+  std::string host{};
+  std::string path{};
+  int port{};
+  SubscribeParams params{};
+};
+
+struct SubscribeMessage {
+  std::string method{"subscribe"};
+  SubscribeParams params;
 };
 
 using FeedCallback = std::function<void(const KrakenOrder &)>;
